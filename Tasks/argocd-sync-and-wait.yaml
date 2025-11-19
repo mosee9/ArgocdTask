@@ -1,0 +1,46 @@
+apiVersion: tekton.dev/v1beta1
+kind: Task
+metadata:
+  name: argocd-sync-and-wait
+  annotations:
+    tekton.dev/pipelines.minVersion: "0.17.0"
+    tekton.dev/tags: argocd, gitops
+    tekton.dev/displayName: "ArgoCD Sync and Wait"
+spec:
+  description: >-
+    Syncs an ArgoCD Application and waits until it is Healthy and Synced.
+  params:
+    - name: application-name
+      type: string
+      description: Name of the ArgoCD Application
+    - name: revision
+      type: string
+      default: HEAD
+      description: Git revision (branch, tag, or commit) to sync to
+    - name: flags
+      type: string
+      default: "--prune --timeout 300"
+      description: Additional argocd sync flags
+    - name: argocd-version
+      type: string
+      default: "v2.12.4"   # Update to latest stable as needed
+  steps:
+    - name: argocd-sync
+      image: argoproj/argocd:$(params.argocd-version)
+      envFrom:
+        - configMapRef:
+            name: argocd-env-configmap   # Contains ARGOCD_SERVER
+        - secretRef:
+            name: argocd-env-secret      # Contains ARGOCD_AUTH_TOKEN
+      script: |
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        echo "Logging in to ArgoCD..."
+        argocd login $ARGOCD_SERVER --grpc-web --insecure
+
+        echo "Syncing application $(params.application-name) to revision $(params.revision)..."
+        argocd app sync $(params.application-name) --revision $(params.revision) $(params.flags)
+
+        echo "Waiting for application to become Healthy & Synced..."
+        argocd app wait $(params.application-name) --health --synced --timeout 600
